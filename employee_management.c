@@ -15,6 +15,7 @@
 #define NAME_LEN 50
 #define POSITION_LEN 50
 #define DATA_FILE "employees.dat"
+#define MAX_EMPLOYEES 1000
 
 // struct for employee data
 typedef struct {
@@ -31,13 +32,13 @@ typedef struct {
 
 /* -------- Function declarations (prototypes) -------- */
 
-/* Menu + core features */
+/* menu core
 static void printMenu(void);
 static void addEmployee(void);
 static void listEmployees(void);
 static void searchEmployeeByID(void);
 
-/* Input / utility helpers */
+/* util helpers */
 static void clearInputBuffer(void);
 static void readLine(char *buffer, size_t size);
 static int  getInt(const char *prompt);
@@ -47,6 +48,11 @@ static void pauseForEnter(void);
 static void printEmployee(const Employee *emp);
 static int  employeeExists(int employeeID);
 static int isStringEmpty(const char *s);
+static void importFromFile(void);
+static int  loadAllEmployees(Employee employees[], int max);
+static int  saveAllEmployees(Employee employees[], int count);
+static void insertEmployeeSorted(Employee employees[], int *count, const Employee *emp);
+
 
 /*========================*/
 /*menu features*/
@@ -59,6 +65,7 @@ static void printMenu(void){
     printf("2. List Employees\n");
     printf("3. Search Employee by ID\n");
     printf("4. Exit\n");
+    printf("5. Import Employees from File\n");
     printf("==============================\n");
 }
 
@@ -68,7 +75,7 @@ static void printMenu(void){
 static void clearInputBuffer(void){
     int c;
     while ((c = getchar()) != '\n' && c != EOF){
-        // discard characters
+        // discards the chars
     }
 }
 
@@ -126,6 +133,7 @@ static float getFloat(const char *prompt){
     }
 }
 
+// clears the screen after each operation
 static void clearScreen(void)
 {
 #ifdef _WIN32
@@ -135,6 +143,7 @@ static void clearScreen(void)
 #endif
 }
 
+// pausing for user to press enter so it increased user interactivity
 static void pauseForEnter(void){
     printf("\nPress Enter to continue...");
     fflush(stdout);
@@ -165,7 +174,7 @@ static int employeeExists(int employeeID)
     int found = 0;
 
     if (fp == NULL) {
-        /* No file yet = no employees = no duplicates */
+        /* if no file yet = no employees = no duplicates */
         return 0;
     }
 
@@ -186,14 +195,74 @@ static int isStringEmpty(const char *s)
         return 1;
     }
 
-    /* Skip leading spaces/tabs/newlines */
+    /* skip leading spaces/tabs/newlines so no dumb shit */
     while (*s == ' ' || *s == '\t' || *s == '\n') {
         s++;
     }
 
-    /* If we hit the end of the string, it's empty/whitespace only */
+    /* make sure ending is whitespace only */
     return *s == '\0';
 }
+
+/* Load all employees from the data file into an array.
+ * Returns the number of employees loaded (0 if file does not exist). */
+static int loadAllEmployees(Employee employees[], int max)
+{
+    FILE *fp = fopen(DATA_FILE, "rb");
+    int count = 0;
+
+    if (fp == NULL) {
+        /* no file no emps. */
+        return 0;
+    }
+
+    while (count < max && fread(&employees[count], sizeof(Employee), 1, fp) == 1) {
+        count++;
+    }
+
+    fclose(fp);
+    return count;
+}
+
+/* save and overwrite employee.dat file. */
+static int saveAllEmployees(Employee employees[], int count)
+{
+    FILE *fp = fopen(DATA_FILE, "wb");
+    if (fp == NULL) {
+        perror("Error opening data file for writing");
+        return 0;
+    }
+
+    if ((int)fwrite(employees, sizeof(Employee), count, fp) != count) {
+        perror("Error writing employees to data file");
+        fclose(fp);
+        return 0;
+    }
+
+    fclose(fp);
+    return 1;
+}
+
+/* insert and sort using insertion sort*/
+static void insertEmployeeSorted(Employee employees[], int *count, const Employee *emp)
+{
+    int pos = 0;
+    int i;
+
+    /* finding position */
+    while (pos < *count && employees[pos].employeeID < emp->employeeID) {
+        pos++;
+    }
+
+    /* shifting elements in array to insert */
+    for (i = *count; i > pos; i--) {
+        employees[i] = employees[i - 1];
+    }
+
+    employees[pos] = *emp;
+    (*count)++;
+}
+
 
 
 /*========================*/
@@ -203,11 +272,13 @@ static int isStringEmpty(const char *s)
 static void addEmployee(void)
 {
     Employee emp;
-    FILE *fp;
+    Employee employees[MAX_EMPLOYEES];
+    int count;
 
     clearScreen();
     printf("========== Add Employee ==========\n\n");
 
+    /* id validating */
     for (;;) {
         emp.employeeID = getInt("Enter employee ID: ");
 
@@ -215,13 +286,14 @@ static void addEmployee(void)
             printf("Employee ID must be a positive integer. Please try again.\n");
         } else if (employeeExists(emp.employeeID)) {
             printf("An employee with ID %d already exists. "
-                "Please enter a different ID.\n",
-                emp.employeeID);
+                   "Please enter a different ID.\n",
+                   emp.employeeID);
         } else {
             break;
         }
     }
 
+    /* make sure names cant be empty */
     do {
         printf("Enter name: ");
         readLine(emp.name, NAME_LEN);
@@ -231,6 +303,7 @@ static void addEmployee(void)
         }
     } while (isStringEmpty(emp.name));
 
+    /* making sure the position is not empty or negative */
     do {
         printf("Enter position: ");
         readLine(emp.position, POSITION_LEN);
@@ -240,6 +313,7 @@ static void addEmployee(void)
         }
     } while (isStringEmpty(emp.position));
 
+    /* salary cannot be less than 0 thats illegal */
     do {
         emp.salary = getFloat("Enter monthly salary: ");
 
@@ -248,19 +322,22 @@ static void addEmployee(void)
         }
     } while (emp.salary < 0.0f);
 
-    fp = fopen(DATA_FILE, "ab");
-    if (fp == NULL) {
-        perror("Error opening data file");
+    /* loading the emps */
+    count = loadAllEmployees(employees, MAX_EMPLOYEES);
+
+    if (count >= MAX_EMPLOYEES) {
+        printf("Cannot add more employees: maximum capacity reached.\n");
         return;
     }
 
-    if (fwrite(&emp, sizeof(Employee), 1, fp) != 1) {
-        perror("Error writing to data file");
-        fclose(fp);
+    /* using insertion sort function */
+    insertEmployeeSorted(employees, &count, &emp);
+
+    /* save and overwrite */
+    if (!saveAllEmployees(employees, count)) {
+        printf("Failed to save employees to data file.\n");
         return;
     }
-
-    fclose(fp);
 
     printf("\nEmployee added successfully.\n");
 }
@@ -326,6 +403,128 @@ static void searchEmployeeByID(void)
     fclose(fp);
 }
 
+static void importFromFile(void)
+{
+    char filename[100];
+    FILE *fp;
+    char line[256];
+    int lineNumber = 0;
+    int imported = 0;
+    int skipped = 0;
+
+    /* loading employees for mass merging */
+    Employee employees[MAX_EMPLOYEES];
+    int count = loadAllEmployees(employees, MAX_EMPLOYEES);
+
+    clearScreen();
+    printf("======= Import Employees from File =======\n\n");
+    printf("Expected format per line:\n");
+    printf("employeeID,name,position,salary\n");
+    printf("Example: 101,Liam Keats,Manager,5000.00\n\n");
+
+    printf("Enter import filename: ");
+    readLine(filename, sizeof filename);
+
+    fp = fopen(filename, "r");
+    if (fp == NULL) {
+        perror("Error opening import file");
+        return;
+    }
+
+    while (fgets(line, (int)sizeof line, fp) != NULL) {
+        Employee emp;
+        int scanned;
+        int i;
+        int duplicate = 0;
+
+        lineNumber++;
+
+        /* remove the newline so no errors */
+        size_t len = strlen(line);
+        if (len > 0 && line[len - 1] == '\n') {
+            line[len - 1] = '\0';
+        }
+
+        /* parse the information from the line */
+        scanned = sscanf(line, "%d,%49[^,],%49[^,],%f",
+                         &emp.employeeID,
+                         emp.name,
+                         emp.position,
+                         &emp.salary);
+
+        if (scanned != 4) {
+            printf("Line %d: invalid format, skipping.\n", lineNumber);
+            skipped++;
+            continue;
+        }
+
+        /* validating the id */
+        if (emp.employeeID <= 0) {
+            printf("Line %d: invalid employee ID (%d), skipping.\n",
+                   lineNumber, emp.employeeID);
+            skipped++;
+            continue;
+        }
+
+        if (isStringEmpty(emp.name)) {
+            printf("Line %d: empty name, skipping.\n", lineNumber);
+            skipped++;
+            continue;
+        }
+
+        if (isStringEmpty(emp.position)) {
+            printf("Line %d: empty position, skipping.\n", lineNumber);
+            skipped++;
+            continue;
+        }
+
+        if (emp.salary < 0.0f) {
+            printf("Line %d: negative salary %.2f, skipping.\n",
+                   lineNumber, emp.salary);
+            skipped++;
+            continue;
+        }
+
+        /* checkign for duplicate IDS */
+        for (i = 0; i < count; i++) {
+            if (employees[i].employeeID == emp.employeeID) {
+                duplicate = 1;
+                break;
+            }
+        }
+
+        if (duplicate) {
+            printf("Line %d: employee ID %d already exists, skipping.\n",
+                   lineNumber, emp.employeeID);
+            skipped++;
+            continue;
+        }
+
+        if (count >= MAX_EMPLOYEES) {
+            printf("Maximum employee capacity reached. Remaining lines will be skipped.\n");
+            skipped++;
+            break;
+        }
+
+        /* insertion */
+        insertEmployeeSorted(employees, &count, &emp);
+        imported++;
+    }
+
+    fclose(fp);
+
+    /* save the data  */
+    if (!saveAllEmployees(employees, count)) {
+        printf("\nError saving imported employees to data file.\n");
+        return;
+    }
+
+    printf("\nImport complete.\n");
+    printf("Lines processed: %d\n", lineNumber);
+    printf("Employees imported: %d\n", imported);
+    printf("Lines skipped: %d\n", skipped);
+}
+
 /*========================*/
 /*main*/
 /*===============*/
@@ -341,16 +540,19 @@ int main(void)
 
         switch (choice) {
         case 1:
-            addEmployee();      /* this draws the Add screen */
+            addEmployee();      /* draw add screen */
             break;
         case 2:
-            listEmployees();    /* this draws the List screen */
+            listEmployees();    /* draw list screen */
             break;
         case 3:
-            searchEmployeeByID();  /* this draws the Search screen */
+            searchEmployeeByID();  /* draw the search screen */
             break;
         case 4:
             printf("Exiting the program.\n");
+            break;
+        case 5:
+            importFromFile();  /* this handles importing employees from a file */
             break;
         default:
             printf("Invalid choice. Please try again.\n");
